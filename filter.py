@@ -153,7 +153,7 @@ class Filter(object):
 
 
 if __name__ == '__main__':
-    input_path = r'D:\Desktop\test\temp\input'  # FFT.jpg也会储存在这
-    output_path = r'D:\Desktop\test\temp\output'
+    input_path = r'F:\Data\20240606\albite\holo\0.00010'  # FFT.jpg也会储存在这
+    output_path = r'C:\Users\d1009\Desktop\temp\output'
     fil = Filter(input_path, output_path)
     fil.start()

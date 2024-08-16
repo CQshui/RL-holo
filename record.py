@@ -44,14 +44,20 @@ class Dataset:
 
         self.current_img = img
         self.cut()
-        shape_store.append(self.cut_img.shape[:2])
+        try:
+            shape_store.append(self.cut_img.shape[:2])
+        except Exception as e:
+            shape_store.append(None)
+            self.cut_img = self.current_img
         self.cut_img = cv2.resize(self.cut_img, (512, 512))
 
         if self.preprocessing:
-            processed_sample = self.preprocessing(image=img, mask=img)
-            img = processed_sample['image']
+            # processed_sample = self.preprocessing(image=img, mask=img)
+            # img = processed_sample['image']
+            processed_sample = self.preprocessing(image=self.cut_img, mask=self.cut_img)
+            self.cut_img = processed_sample['image']
 
-        return img, img.astype(np.float32), self.cut_img
+        return self.cut_img
 
     def __len__(self):
         return len(self.img_ids)
@@ -67,7 +73,7 @@ class Dataset:
         return self.cut_img
 
     def on_mouse(self, event, x, y, flags, param):
-        global point1, point2, flag
+        global point1, point2, flag, min_x, min_y
         img_copy = self.current_img.copy()
         if event == cv2.EVENT_LBUTTONDOWN:  # 左键点击
             flag = 1
@@ -100,7 +106,11 @@ def get_preprocessing(preprocessing_fn):
 
 
 def get_position(pr):
+    # pr = cv2.cvtColor(pr, cv2.COLOR_RGB2BGR)
     contours, _ = cv2.findContours(pr, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    cut_0_copy = cv2.cvtColor(np.squeeze(cut_0),cv2.COLOR_RGB2GRAY)
+
+    # cv2.drawContours(cut_0, contours, -1, (0, 255, 0), 20)
     counter_x = []
     counter_y = []
     counter_w = []
@@ -117,11 +127,11 @@ def get_position(pr):
     y_center = counter_y[max_index]
     w_center = counter_w[max_index]
     h_center = counter_h[max_index]
-    cv2.rectangle(cut_0, (x_center, y_center), (x_center + w_center, y_center + h_center),
+    cv2.rectangle(cut_0_copy, (x_center, y_center), (x_center + w_center, y_center + h_center),
                   (0, 255, 0), 8)
 
     cv2.namedWindow('PR', 0)
-    cv2.imshow("PR", cut_0)
+    cv2.imshow("PR", cut_0_copy)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
@@ -157,9 +167,9 @@ if __name__ == "__main__":
     Finish_1 = []
 
     # 图片参数设置
-    model_path = r'I:\UNet_Torch_Seg\best_model.h5'      # TODO
-    predict_images_dir = r'I:\0_Datas\Working\2.1_512x563'  # TODO
-    save_dir = r'I:\0_Datas\Working\labeled'             # TODO
+    model_path = r'.\best_model.h5'      # TODO
+    predict_images_dir = r'C:\Users\d1009\Desktop\temp\reconstruction\Image__2024-06-06__20-20-17.bmp'  # TODO
+    save_dir = r'C:\Users\d1009\Desktop\test\offaxis\result'             # TODO
     shape_store = []
 
     # 模型参数设置
@@ -181,7 +191,8 @@ if __name__ == "__main__":
     ids = [x for x in range(len(record_dataset))]
     for i, id in enumerate(ids):
         flag = 0
-        cut_0 = record_dataset[id][2]
+        min_x = min_y = 0
+        cut_0 = record_dataset[id]
         cut = np.expand_dims(cut_0, axis=0)
 
         # 记录图片名
@@ -190,22 +201,25 @@ if __name__ == "__main__":
 
         # 记录z
         z = re.search(r"_([^_]+)\.", image_id)
-        z_state.append(z)
+        z_state.append(float(z.group(1)))
 
         # 记录flag
         cut_flag.append(flag)
 
         if flag == 1:
             pr_mask = model.predict(cut).round()
+            # pr_mask = cv2.bitwise_not(pr_mask)
             pr_mask = np.squeeze(pr_mask)*255
 
             # 大小回归
             pr_mask = cv2.resize(pr_mask, (shape_store[id][1], shape_store[id][0]))
+            cut_0 = cv2.resize(cut_0, (shape_store[id][1], shape_store[id][0]))
+            # cv2.imwrite(r'1.jpg', pr_mask)
 
             # 框选轮廓，返回左上和右下两个顶点坐标
-            particle_pos = get_position(pr_mask)
-            left_top = (particle_pos[0], particle_pos[1])
-            right_bottom = (particle_pos[0] + particle_pos[2], particle_pos[1] + particle_pos[3])
+            particle_pos = get_position(pr_mask.astype(np.uint8))
+            left_top = (min_x+particle_pos[0], min_y+particle_pos[1])
+            right_bottom = (min_x+particle_pos[0] + particle_pos[2], min_y+particle_pos[1] + particle_pos[3])
 
             # 记录坐标
             Start_0.append(left_top[0])
