@@ -18,7 +18,7 @@ from matplotlib.widgets import Button
 import csv
 import re
 
-matplotlib.use('QTAgg')
+matplotlib.use('TkAgg')
 
 
 class Dataset:
@@ -168,8 +168,7 @@ if __name__ == "__main__":
 
     # 图片参数设置
     model_path = r'.\best_model.h5'      # TODO
-    predict_images_dir = r'C:\Users\d1009\Desktop\temp\reconstruction\Image__2024-06-06__20-20-17.bmp'  # TODO
-    save_dir = r'C:\Users\d1009\Desktop\test\offaxis\result'             # TODO
+    predict_images_dir = r'D:\Desktop\test\offaxis\ang'  # TODO
     shape_store = []
 
     # 模型参数设置
