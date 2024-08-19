@@ -49,6 +49,7 @@ class Dataset:
         img = cv2.imread(os.path.join(self.img_fps[idx]))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
+        self.flag = 0
         self.current_img = img
         self.cuts = []
         self.one_min_xy = []
@@ -58,6 +59,7 @@ class Dataset:
         if len(self.cuts) >= 1:
             shape_temp = []
             for j in range(len(self.cuts)):
+                self.cuts[j] = cv2.resize(self.cuts[j], (512, 512))
                 shape_temp.append(self.cuts[j].shape[:2])
             shape_store.append(shape_temp)
             # del shape_temp
@@ -65,8 +67,6 @@ class Dataset:
         else:
             shape_store.append(None)
             self.cut_img = self.current_img
-
-        self.cut_img = cv2.resize(self.cut_img, (512, 512))
 
         if self.preprocessing:
             # processed_sample = self.preprocessing(image=img, mask=img)
@@ -119,7 +119,6 @@ class Dataset:
             cv2.waitKey(0)
 
 
-
 def get_preprocessing(preprocessing_fn):
     _transform = [
             A.Lambda(image=preprocessing_fn),
@@ -127,10 +126,11 @@ def get_preprocessing(preprocessing_fn):
     return A.Compose(_transform)
 
 
-def get_position(pr):
+def get_position(cut_img, pr):
     # pr = cv2.cvtColor(pr, cv2.COLOR_RGB2BGR)
     contours, _ = cv2.findContours(pr, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
-    cut_0_copy = cv2.cvtColor(np.squeeze(cut_0),cv2.COLOR_RGB2GRAY)
+    # cut_copy = np.squeeze(cut_img)
+    cut_copy = cv2.cvtColor(np.squeeze(cut_img), cv2.COLOR_RGB2GRAY)
 
     # cv2.drawContours(cut_0, contours, -1, (0, 255, 0), 20)
     counter_x = []
@@ -149,15 +149,28 @@ def get_position(pr):
     y_center = counter_y[max_index]
     w_center = counter_w[max_index]
     h_center = counter_h[max_index]
-    cv2.rectangle(cut_0_copy, (x_center, y_center), (x_center + w_center, y_center + h_center),
+    cv2.rectangle(cut_copy, (x_center, y_center), (x_center + w_center, y_center + h_center),
                   (0, 255, 0), 8)
 
     cv2.namedWindow('PR', 0)
-    cv2.imshow("PR", cut_0_copy)
+    cv2.imshow("PR", cut_copy)
     cv2.waitKey(0)
     cv2.destroyAllWindows()
 
     return x_center, y_center, w_center, h_center
+
+
+def write_info(id):
+    # 记录图片名
+    image_id = record_dataset.img_ids[id]
+    image_name.append(image_id)
+
+    # 记录z
+    z = re.search(r"_([^_]+)\.", image_id)
+    z_state.append(float(z.group(1)))
+
+    # 记录flag
+    cut_flag.append(record_dataset.flag)
 
 
 def save_as_csv(dicts_l, head):
@@ -166,7 +179,7 @@ def save_as_csv(dicts_l, head):
         raise ValueError("All dictionaries must have the same keys as the header")
 
     # 打开文件准备写入
-    with open("news.csv", "w", newline='', encoding='utf_8_sig') as fo:
+    with open("Objects.csv", "w", newline='', encoding='utf_8_sig') as fo:
         writer = csv.writer(fo)
         # 写入表头
         writer.writerow(head)
@@ -227,20 +240,11 @@ if __name__ == "__main__":
     for i, id in enumerate(ids):
         cuts = record_dataset[id]
 
-        # 记录图片名
-        image_id = record_dataset.img_ids[id]
-        image_name.append(image_id)
-
-        # 记录z
-        z = re.search(r"_([^_]+)\.", image_id)
-        z_state.append(float(z.group(1)))
-
-        # 记录flag
-        cut_flag.append(record_dataset.flag)
-
         if record_dataset.flag == 1:
 
             for k in range(len(cuts)):
+                write_info(id)
+
                 cut = cuts[k]
                 cut = np.expand_dims(cut, axis=0)
 
@@ -252,22 +256,24 @@ if __name__ == "__main__":
                 # cv2.imwrite(r'1.jpg', pr_mask)
 
                 # 框选轮廓，返回左上和右下两个顶点坐标
-
-                particle_pos = get_position(pr_mask.astype(np.uint8))
-                left_top = (min_x+particle_pos[0], min_y+particle_pos[1])
-                right_bottom = (min_x+particle_pos[0] + particle_pos[2], min_y+particle_pos[1] + particle_pos[3])
+                particle_pos = get_position(cut, pr_mask.astype(np.uint8))
+                left_top = (record_dataset.min_xy[id][k][0]+particle_pos[0], record_dataset.min_xy[id][k][1]+particle_pos[1])
+                right_bottom = (record_dataset.min_xy[id][k][0]+particle_pos[0]+particle_pos[2], record_dataset.min_xy[id][k][1]+particle_pos[1]+particle_pos[3])
 
                 # 记录坐标
                 Start_0.append(left_top[0])
                 Start_1.append(left_top[1])
                 Finish_0.append(right_bottom[0])
                 Finish_1.append(right_bottom[1])
+                print("Object Info;")
 
         else:
+            write_info(id)
             Start_0.append(None)
             Start_1.append(None)
             Finish_0.append(None)
             Finish_1.append(None)
+            print("Empty Info;")
 
     # 定义字典
     dicts = {'img': image_name, 'z_state': z_state, 'flag': cut_flag,
@@ -279,6 +285,7 @@ if __name__ == "__main__":
 
     # 写入CSV
     save_as_csv(dicts_list, header)
+    print("Info Written.")
 
     # 思路：创建图像界面，鼠标大致截取颗粒图像，将这部分图像输入模型预测，输出其中最大contour的预测矩形框的两个顶点坐标。
     # CSV记录图像名称、z、是否截取颗粒、顶点坐标1和坐标2
