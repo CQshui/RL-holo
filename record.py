@@ -18,7 +18,7 @@ from matplotlib.widgets import Button
 import csv
 import re
 
-matplotlib.use('QTAgg')
+matplotlib.use('TkAgg')
 
 
 class Dataset:
@@ -38,26 +38,44 @@ class Dataset:
 
         self.cut_img = None
 
+        self.cuts = []
+
+        self.one_min_xy = []
+        self.min_xy = []
+
+        self.flag = 0
+
     def __getitem__(self, idx):
         img = cv2.imread(os.path.join(self.img_fps[idx]))
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
 
         self.current_img = img
+        self.cuts = []
+        self.one_min_xy = []
         self.cut()
-        try:
-            shape_store.append(self.cut_img.shape[:2])
-        except Exception as e:
+        self.min_xy.append(self.one_min_xy)
+
+        if len(self.cuts) >= 1:
+            shape_temp = []
+            for j in range(len(self.cuts)):
+                shape_temp.append(self.cuts[j].shape[:2])
+            shape_store.append(shape_temp)
+            # del shape_temp
+
+        else:
             shape_store.append(None)
             self.cut_img = self.current_img
+
         self.cut_img = cv2.resize(self.cut_img, (512, 512))
 
         if self.preprocessing:
             # processed_sample = self.preprocessing(image=img, mask=img)
             # img = processed_sample['image']
-            processed_sample = self.preprocessing(image=self.cut_img, mask=self.cut_img)
-            self.cut_img = processed_sample['image']
+            for ii in range(len(self.cuts)):
+                processed_sample = self.preprocessing(image=self.cuts[ii], mask=self.cuts[ii])
+                self.cuts[ii] = processed_sample['image']
 
-        return self.cut_img
+        return self.cuts
 
     def __len__(self):
         return len(self.img_ids)
@@ -73,10 +91,10 @@ class Dataset:
         return self.cut_img
 
     def on_mouse(self, event, x, y, flags, param):
-        global point1, point2, flag, min_x, min_y
+        global point1, point2
         img_copy = self.current_img.copy()
         if event == cv2.EVENT_LBUTTONDOWN:  # 左键点击
-            flag = 1
+            self.flag = 1
             point1 = (x, y)
             cv2.circle(img_copy, point1, 10, (0, 255, 0), 3)
             cv2.imshow('Image', img_copy)
@@ -93,9 +111,13 @@ class Dataset:
             rectangle_width = abs(point1[0] - point2[0])
             rectangle_height = abs(point1[1] - point2[1])
 
-            self.cut_img = self.current_img[min_y:min_y+rectangle_height, min_x:min_x+rectangle_width]
+            self.one_min_xy.append((min_x, min_y))
 
-            cv2.imshow('Image', self.cut_img)
+            self.cut_img = self.current_img[min_y:min_y+rectangle_height, min_x:min_x+rectangle_width]
+            self.cuts.append(self.cut_img)
+            cv2.imshow('Cut Image', self.cut_img)
+            cv2.waitKey(0)
+
 
 
 def get_preprocessing(preprocessing_fn):
@@ -139,15 +161,28 @@ def get_position(pr):
 
 
 def save_as_csv(dicts_l, head):
-    # 创建一个CSV
-    fo = open("news.CSV", "w", newline='', encoding='utf_8_sig')
-    # 写入表头
-    writer = csv.DictWriter(fo, head)
-    writer.writeheader()
-    # 将上一步计算的字典列表写入 CSV 文件中
-    writer.writerows(dicts_l)
-    # 关闭文件对象
-    fo.close()
+    # 确保所有字典都有相同的键
+    if not all(set(d.keys()) == set(head) for d in dicts_l):
+        raise ValueError("All dictionaries must have the same keys as the header")
+
+    # 打开文件准备写入
+    with open("news.csv", "w", newline='', encoding='utf_8_sig') as fo:
+        writer = csv.writer(fo)
+        # 写入表头
+        writer.writerow(head)
+
+        # 获取每列的最大长度
+        max_len = {key: len(value) for key, value in dicts_l[0].items()}
+
+        # 写入每行数据
+        for idx in range(max(max_len.values())):
+            row = []
+            for key in head:
+                if idx < len(dicts_l[0][key]):
+                    row.append(dicts_l[0][key][idx])
+                else:
+                    row.append('')
+            writer.writerow(row)
 
 
 if __name__ == "__main__":
@@ -168,8 +203,8 @@ if __name__ == "__main__":
 
     # 图片参数设置
     model_path = r'.\best_model.h5'      # TODO
-    predict_images_dir = r'C:\Users\d1009\Desktop\temp\reconstruction\Image__2024-06-06__20-20-17.bmp'  # TODO
-    save_dir = r'C:\Users\d1009\Desktop\test\offaxis\result'             # TODO
+    predict_images_dir = r'D:\Desktop\test\offaxis\ang'  # TODO
+    save_dir = r'D:\Desktop\test\offaxis\result'             # TODO
     shape_store = []
 
     # 模型参数设置
@@ -190,10 +225,7 @@ if __name__ == "__main__":
 
     ids = [x for x in range(len(record_dataset))]
     for i, id in enumerate(ids):
-        flag = 0
-        min_x = min_y = 0
-        cut_0 = record_dataset[id]
-        cut = np.expand_dims(cut_0, axis=0)
+        cuts = record_dataset[id]
 
         # 记录图片名
         image_id = record_dataset.img_ids[id]
@@ -204,28 +236,32 @@ if __name__ == "__main__":
         z_state.append(float(z.group(1)))
 
         # 记录flag
-        cut_flag.append(flag)
+        cut_flag.append(record_dataset.flag)
 
-        if flag == 1:
-            pr_mask = model.predict(cut).round()
-            # pr_mask = cv2.bitwise_not(pr_mask)
-            pr_mask = np.squeeze(pr_mask)*255
+        if record_dataset.flag == 1:
 
-            # 大小回归
-            pr_mask = cv2.resize(pr_mask, (shape_store[id][1], shape_store[id][0]))
-            cut_0 = cv2.resize(cut_0, (shape_store[id][1], shape_store[id][0]))
-            # cv2.imwrite(r'1.jpg', pr_mask)
+            for k in range(len(cuts)):
+                cut = cuts[k]
+                cut = np.expand_dims(cut, axis=0)
 
-            # 框选轮廓，返回左上和右下两个顶点坐标
-            particle_pos = get_position(pr_mask.astype(np.uint8))
-            left_top = (min_x+particle_pos[0], min_y+particle_pos[1])
-            right_bottom = (min_x+particle_pos[0] + particle_pos[2], min_y+particle_pos[1] + particle_pos[3])
+                pr_mask = model.predict(cut).round()
+                pr_mask = np.squeeze(pr_mask)*255
 
-            # 记录坐标
-            Start_0.append(left_top[0])
-            Start_1.append(left_top[1])
-            Finish_0.append(right_bottom[0])
-            Finish_1.append(right_bottom[1])
+                # 大小回归
+                pr_mask = cv2.resize(pr_mask, (shape_store[id][k][1], shape_store[id][k][0]))
+                # cv2.imwrite(r'1.jpg', pr_mask)
+
+                # 框选轮廓，返回左上和右下两个顶点坐标
+
+                particle_pos = get_position(pr_mask.astype(np.uint8))
+                left_top = (min_x+particle_pos[0], min_y+particle_pos[1])
+                right_bottom = (min_x+particle_pos[0] + particle_pos[2], min_y+particle_pos[1] + particle_pos[3])
+
+                # 记录坐标
+                Start_0.append(left_top[0])
+                Start_1.append(left_top[1])
+                Finish_0.append(right_bottom[0])
+                Finish_1.append(right_bottom[1])
 
         else:
             Start_0.append(None)
@@ -233,10 +269,12 @@ if __name__ == "__main__":
             Finish_0.append(None)
             Finish_1.append(None)
 
+    # 定义字典
     dicts = {'img': image_name, 'z_state': z_state, 'flag': cut_flag,
              'start_0': Start_0, 'start_1': Start_1, 'finish_0': Finish_0, 'finish_1': Finish_1}
-
     dicts_list.append(dicts)
+
+    # 定义表头
     header = ['img', 'z_state', 'flag', 'start_0', 'start_1', 'finish_0', 'finish_1']
 
     # 写入CSV
